@@ -1,0 +1,193 @@
+/*
+ * 서브쿼리
+ * 서브쿼리는 쿼리 안에 또 다른 쿼리를 넣어 데이터를 필터링하거나 계산하는 방법이다.
+ * 
+ * 실생활 비유
+ * 친구 중 "운동을 좋아하는 사람"을 찾으려면 먼저 "운동 동아리 명단"을 확인하는 것과 비슷
+ * 
+ * 사용 유형
+ * in -> 서브쿼리 결과에 포함된 값만 반환
+ * not in => 서브쿼리 결과에 없는 값 반환
+ * exists -> 서브쿼리의 결과가 존재하면 TRUE
+ * 
+ * 쿼리 실행 방식
+ * 서브쿼리는 내부적으로 임시 결과 집합을 만들어 메모리에 저장한다.
+ * 실행 최적화를 위해 인덱스 활용 및 join 대체 가능성을 고려해야 한다.
+ * */
+
+-- WHERE 절에서 서브쿼리 활용
+
+-- 수강 신청한 학생 조회(IN 활용)
+SELECT
+	username
+FROM users u
+WHERE user_id IN (
+	SELECT user_id FROM enrollments e
+);
+
+-- 수강 신청하지 않은 학생 조회(NOT IN 활용)
+SELECT
+	username
+FROM users
+WHERE user_id NOT IN (
+	SELECT user_id FROM enrollments
+);
+
+-- 수강 신청한 학생이 있는지 확인
+SELECT
+	username
+FROM users u
+WHERE EXISTS (
+	SELECT 1 FROM enrollments e WHERE e.user_id = u.user_id
+);
+
+
+/*
+ * 2. select절에서 서브쿼리 활용
+ * - 문법 : 단일 행, 단일 열 결과만 반환해야 함
+ * - 메모리 : 행별로 서브쿼리 실행, 결과는 캐싱되지 않음
+ * */
+
+-- 학생별 결제 내역과 강좌 평균 가격 조회
+SELECT
+	u.username,
+	p.amount,
+	(SELECT
+		avg(p2.amount)
+		FROM payments p2
+		WHERE p2.course_id = p.course_id
+	) AS avg_course_payment
+FROM users u
+INNER JOIN payments p ON u.user_id = p.user_id;
+
+
+/*
+ * 3. From절에서 서브쿼리 활용
+ * 		From절 서브쿼리란? 임시 테이블(인라인 뷰)를 만들어 쿼리에서 활용
+ * - 실생활 비유 : "판매 상위 상품"을 뽑아 그 중 조건에 맞는 것만 분석하는 것과 비슷하다.
+ * - 문법 : 서브쿼리에 별칭 필수
+ * - 메모리 : 임시 테이블이 메모리에 생성, 대량 데이터 시 디스크 사용 가능
+ * - 성능 : 인덱스와 조건 미리 적용으로 최적화 가능
+ * */
+
+SELECT
+	sub.course_id,
+	sub.avg_amount
+FROM (
+	SELECT
+		course_id,
+		avg(amount) AS avg_amount
+	FROM payments
+	GROUP BY course_id
+) AS sub
+WHERE sub.avg_amount > 100;
+)
+
+
+/*    WHERE 미션     */
+
+-- 📌 결제한 학생 목록 조회 (IN 활용)
+SELECT
+	*
+FROM users
+WHERE user_id IN (SELECT user_id FROM payments)
+
+-- 📌 퀴즈에 응시하지 않은 학생 목록 조회 (NOT IN 활용)
+SELECT
+	*
+FROM users
+WHERE user_id NOT IN (SELECT user_id FROM quiz_attempts)
+
+-- 📌 과제가 있는 강의 목록 조회 (EXISTS 활용)
+SELECT
+	*
+FROM lessons
+WHERE EXISTS (SELECT 1 FROM assignments) 
+
+/*       SELECT 미션        */
+-- 📌 퀴즈 점수와 퀴즈별 평균 점수 비교
+SELECT * FROM quiz_attempts
+
+SELECT
+	q.quiz_id,
+	(SELECT
+		avg(score)
+	 FROM quiz_attempts qa
+	 WHERE q.quiz_id = qa.quiz_id)
+FROM quizzes q
+GROUP BY q.quiz_id
+
+-- 📌 결제 금액과 해당 강좌의 수강생 수 출력
+SELECT
+	-- 결제 금액
+	c.course_id,
+	sum(p.amount),
+	-- 해당 강좌의 수강생 수
+	(SELECT
+		count(user_id)
+	 FROM enrollments e
+	 WHERE e.course_id = c.course_id)
+FROM courses c
+INNER JOIN payments p ON p.course_id = c.course_id
+GROUP BY c.course_id, p.amount
+
+-- 📌 학생별 평균 결제 금액 조회
+SELECT
+	user_id,
+	avg(amount) AS average_amount
+FROM payments
+GROUP BY user_id
+
+/*        FROM 미션         */
+-- 📌 평균 점수보다 높은 퀴즈 조회
+-- 퀴즈별 사용자의 평균 점수와 높은 퀴즈...?
+-- 퀴즈 제목, 평균
+SELECT
+	av.q_title,
+	qa.score
+FROM (
+	SELECT
+		q.title AS q_title,
+		avg(qa.score) AS avg_score
+	FROM quizzes q
+	INNER JOIN quiz_attempts qa ON q.quiz_id = qa.quiz_id
+	GROUP BY q.quiz_id
+) AS av
+INNER JOIN quiz_attempts qa
+WHERE qa.score > av.avg_score
+
+-- 📌 결제 총액 평균보다 큰 강좌 조회
+SELECT
+	pm.course,
+	p.amount
+FROM (
+	SELECT
+		course_id AS course,
+		avg(amount) AS avg_amount
+	FROM payments p
+	GROUP BY course_id
+) AS pm
+INNER JOIN payments p
+WHERE p.amount > pm.avg_amount
+
+-- 📌 평균 과제 수보다 많은 강의 조회
+SELECT
+	l.title,
+	am.count_assign
+FROM (
+	SELECT
+		lesson_id,
+		count(lesson_id) AS count_assign
+	FROM assignments
+	GROUP BY lesson_id
+	) AS am
+INNER JOIN lessons l ON am.lesson_id = l.lesson_id
+WHERE am.count_assign > (
+SELECT
+	avg(a.count_assign) AS avg_assign
+FROM (
+	SELECT
+		count(lesson_id) AS count_assign
+	FROM assignments
+	GROUP BY lesson_id
+	) AS a)
